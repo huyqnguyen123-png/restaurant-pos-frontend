@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,17 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { ReceiptPercentIcon } from 'react-native-heroicons/outline';
 import { RootStackParamList } from '../navigation/types';
 import { orderApi } from '../api/orderApi';
 import { OrderDetail, OrderItem, PaymentMethod } from '../types/order';
 import { formatCurrency } from '../utils/format';
 import AddItemSearch from '../components/AddItemSearch';
+import ReceiptModal from '../components/ReceiptModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderDetail'>;
 
-export default function OrderDetailScreen({ route }: Props) {
+export default function OrderDetailScreen({ route, navigation }: Props) {
   const { orderId } = route.params;
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,10 +30,15 @@ export default function OrderDetailScreen({ route }: Props) {
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
   const [selectedQuantities, setSelectedQuantities] = useState<Record<number, number>>({});
 
-  // Inline edit state for renaming the table number / customer name
   const [editingInfo, setEditingInfo] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [savingInfo, setSavingInfo] = useState(false);
+
+  const [editingNoteItemId, setEditingNoteItemId] = useState<number | null>(null);
+  const [noteInput, setNoteInput] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+
+  const [receiptVisible, setReceiptVisible] = useState(false);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -49,14 +56,33 @@ export default function OrderDetailScreen({ route }: Props) {
     }, [loadOrder])
   );
 
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity onPress={() => setReceiptVisible(true)} style={styles.headerButton}>
+          <ReceiptPercentIcon size={24} color="#2563eb" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, order]);
+
   const isOpen = order?.status === 'OPEN';
   const unpaidItems = order?.items.filter((i) => !i.paid) ?? [];
   const allPaid = order !== null && order.items.length > 0 && unpaidItems.length === 0;
-  // Every PAID order has exactly one payment method covering all its items
-  // (see backend PaymentService), so any item's paymentMethod represents the
-  // whole order's payment method.
   const currentPaymentMethod: PaymentMethod | null =
     order?.status === 'PAID' ? order.items[0]?.paymentMethod ?? null : null;
+
+  // Live running total of exactly what's currently selected in Split Bill
+  // mode, honoring any partial quantity chosen per item (not just the
+  // item's full subtotal) — recalculated on every render as selections change.
+  const splitSelectedTotal = order
+    ? selectedItemIds.reduce((sum, id) => {
+        const item = order.items.find((i) => i.id === id);
+        if (!item) return sum;
+        const qty = selectedQuantities[id] ?? item.quantity;
+        return sum + item.unitPrice * qty;
+      }, 0)
+    : 0;
 
   const handleAddItem = async (menuItemId: number) => {
     try {
@@ -70,10 +96,10 @@ export default function OrderDetailScreen({ route }: Props) {
     }
   };
 
-  const handleAddCustomItem = async (name: string, price: number, quantity: number) => {
+  const handleAddCustomItem = async (name: string, price: number, quantity: number, note: string) => {
     try {
       setBusy(true);
-      const updated = await orderApi.addCustomItem(orderId, name, price, quantity);
+      const updated = await orderApi.addCustomItem(orderId, name, price, quantity, note);
       setOrder(updated);
     } catch (error: any) {
       Alert.alert('Error', error?.response?.data?.error || 'Failed to add custom item');
@@ -191,8 +217,6 @@ export default function OrderDetailScreen({ route }: Props) {
     });
   };
 
-  // --- edit table number / customer name ---
-
   const startInfoEdit = () => {
     if (!order) return;
     setEditValue(
@@ -243,8 +267,6 @@ export default function OrderDetailScreen({ route }: Props) {
     }
   };
 
-  // --- edit payment method (CASH <-> CARD) on an already-paid order ---
-
   const handleChangePaymentMethod = () => {
     Alert.alert('Change payment method', 'Correct the payment method for this order', [
       { text: 'Cancel', style: 'cancel' },
@@ -265,6 +287,30 @@ export default function OrderDetailScreen({ route }: Props) {
     }
   };
 
+  const startNoteEdit = (item: OrderItem) => {
+    setEditingNoteItemId(item.id);
+    setNoteInput(item.notes ?? '');
+  };
+
+  const cancelNoteEdit = () => {
+    setEditingNoteItemId(null);
+    setNoteInput('');
+  };
+
+  const saveNoteEdit = async (item: OrderItem) => {
+    try {
+      setSavingNote(true);
+      const updated = await orderApi.updateItemNotes(orderId, item.id, noteInput.trim());
+      setOrder(updated);
+      setEditingNoteItemId(null);
+      setNoteInput('');
+    } catch (error: any) {
+      Alert.alert('Error', error?.response?.data?.error || 'Failed to update note');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   if (loading || !order) {
     return <ActivityIndicator size="large" style={styles.loader} />;
   }
@@ -277,6 +323,7 @@ export default function OrderDetailScreen({ route }: Props) {
   const renderItem = ({ item }: { item: OrderItem }) => {
     const isSelected = selectedItemIds.includes(item.id);
     const selectedQty = selectedQuantities[item.id] ?? item.quantity;
+    const isEditingNote = editingNoteItemId === item.id;
 
     return (
       <View style={styles.itemRow}>
@@ -302,6 +349,39 @@ export default function OrderDetailScreen({ route }: Props) {
             {formatCurrency(item.unitPrice)} x {item.quantity}
             {item.paid ? `  •  Paid (${item.paymentMethod})` : ''}
           </Text>
+
+          {isEditingNote ? (
+            <View style={styles.noteEditRow}>
+              <TextInput
+                style={styles.noteInput}
+                placeholder="Note, e.g. no chili"
+                value={noteInput}
+                onChangeText={setNoteInput}
+                autoFocus
+              />
+              <TouchableOpacity
+                style={styles.noteSaveButton}
+                onPress={() => saveNoteEdit(item)}
+                disabled={savingNote}
+              >
+                <Text style={styles.noteButtonText}>{savingNote ? '...' : 'Save'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.noteCancelButton} onPress={cancelNoteEdit} disabled={savingNote}>
+                <Text style={styles.noteButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View>
+              {item.notes ? (
+                <Text style={styles.noteText}>📝 {item.notes}</Text>
+              ) : null}
+              {!splitMode && (
+                <TouchableOpacity onPress={() => startNoteEdit(item)} style={styles.noteLinkTouch}>
+                  <Text style={styles.noteLink}>{item.notes ? 'Edit note' : 'Add note'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           {splitMode && isSelected && item.quantity > 1 && (
             <View style={styles.splitQtyRow}>
@@ -393,36 +473,50 @@ export default function OrderDetailScreen({ route }: Props) {
       </View>
 
       {isOpen && !allPaid && order.items.length > 0 && (
-        <View style={styles.paymentSection}>
-          {!splitMode ? (
-            <>
-              <TouchableOpacity style={styles.payButton} onPress={handlePayFull} disabled={busy}>
-                <Text style={styles.payButtonText}>Pay Full Bill</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.splitButton} onPress={() => setSplitMode(true)} disabled={busy}>
-                <Text style={styles.splitButtonText}>Split Bill</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.payButton} onPress={handlePaySelected} disabled={busy}>
-                <Text style={styles.payButtonText}>Pay Selected ({selectedItemIds.length})</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelSplitButton}
-                onPress={() => {
-                  setSplitMode(false);
-                  setSelectedItemIds([]);
-                  setSelectedQuantities({});
-                }}
-                disabled={busy}
-              >
-                <Text style={styles.cancelSplitButtonText}>Cancel Split</Text>
-              </TouchableOpacity>
-            </>
+        <View>
+          {splitMode && (
+            <View style={styles.splitTotalRow}>
+              <Text style={styles.splitTotalLabel}>Selected total ({selectedItemIds.length} item{selectedItemIds.length === 1 ? '' : 's'})</Text>
+              <Text style={styles.splitTotalAmount}>{formatCurrency(splitSelectedTotal)}</Text>
+            </View>
           )}
+          <View style={styles.paymentSection}>
+            {!splitMode ? (
+              <>
+                <TouchableOpacity style={styles.payButton} onPress={handlePayFull} disabled={busy}>
+                  <Text style={styles.payButtonText}>Pay Full Bill</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.splitButton} onPress={() => setSplitMode(true)} disabled={busy}>
+                  <Text style={styles.splitButtonText}>Split Bill</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.payButton} onPress={handlePaySelected} disabled={busy}>
+                  <Text style={styles.payButtonText}>Pay Selected</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelSplitButton}
+                  onPress={() => {
+                    setSplitMode(false);
+                    setSelectedItemIds([]);
+                    setSelectedQuantities({});
+                  }}
+                  disabled={busy}
+                >
+                  <Text style={styles.cancelSplitButtonText}>Cancel Split</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
       )}
+
+      <ReceiptModal
+        visible={receiptVisible}
+        order={order}
+        onClose={() => setReceiptVisible(false)}
+      />
     </View>
   );
 }
@@ -436,6 +530,9 @@ const styles = StyleSheet.create({
   loader: {
     flex: 1,
     marginTop: 40,
+  },
+  headerButton: {
+    paddingHorizontal: 8,
   },
   header: {
     flexDirection: 'row',
@@ -459,6 +556,7 @@ const styles = StyleSheet.create({
     color: '#2563eb',
     fontWeight: '600',
     fontSize: 13,
+    backgroundColor: '#fff',
   },
   editInfoRow: {
     flexDirection: 'row',
@@ -495,6 +593,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#2563eb',
+    backgroundColor: '#fff',
   },
   statusPaid: {
     color: '#16a34a',
@@ -513,6 +612,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#166534',
+    backgroundColor: '#f0fdf4',
   },
   itemRow: {
     flexDirection: 'row',
@@ -548,6 +648,54 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginTop: 2,
+  },
+  noteText: {
+    fontSize: 12,
+    color: '#7c3aed',
+    fontStyle: 'italic',
+    backgroundColor: '#fff',
+    marginTop: 4,
+  },
+  noteLinkTouch: {
+    marginTop: 4,
+  },
+  noteLink: {
+    fontSize: 12,
+    color: '#2563eb',
+    fontWeight: '600',
+    backgroundColor: '#fff',
+  },
+  noteEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 6,
+  },
+  noteInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 13,
+  },
+  noteSaveButton: {
+    backgroundColor: '#16a34a',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  noteCancelButton: {
+    backgroundColor: '#9ca3af',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  noteButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 12,
   },
   itemSubtotal: {
     fontSize: 15,
@@ -624,6 +772,28 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: 'bold',
   },
+  splitTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fffbeb',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+  },
+  splitTotalLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#92400e',
+    backgroundColor: '#fffbeb',
+  },
+  splitTotalAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#92400e',
+    backgroundColor: '#fffbeb',
+  },
   emptyText: {
     textAlign: 'center',
     color: '#999',
@@ -632,7 +802,7 @@ const styles = StyleSheet.create({
   paymentSection: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 14,
+    marginTop: 10,
   },
   payButton: {
     flex: 1,

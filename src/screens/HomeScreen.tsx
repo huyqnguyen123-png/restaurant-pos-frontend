@@ -15,15 +15,17 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { orderApi } from '../api/orderApi';
-import { OrderSummary } from '../types/order';
+import { OrderSummary, OrderType } from '../types/order';
 import { formatCurrency } from '../utils/format';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MainTabs'>;
+type FilterOption = 'ALL' | OrderType;
 
 export default function HomeScreen({ navigation }: Props) {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<FilterOption>('ALL');
   const swipeRefs = useRef<Map<number, SwipeableRowHandle>>(new Map());
 
   const loadOrders = useCallback(async () => {
@@ -78,6 +80,17 @@ export default function HomeScreen({ navigation }: Props) {
     );
   };
 
+  const filterOptions: { label: string; value: FilterOption }[] = [
+    { label: 'All', value: 'ALL' },
+    { label: 'Dine-in', value: 'DINE_IN' },
+    { label: 'Takeaway', value: 'TAKEAWAY' },
+  ];
+
+  // Filtering happens client-side since the OPEN orders list is already
+  // fetched in full — no need for a separate backend query per order type.
+  const filteredOrders =
+    filter === 'ALL' ? orders : orders.filter((o) => o.orderType === filter);
+
   const renderOrderCard = ({ item }: { item: OrderSummary }) => {
     const label =
       item.orderType === 'DINE_IN'
@@ -123,16 +136,39 @@ export default function HomeScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.filterRow}>
+        {filterOptions.map((option) => (
+          <TouchableOpacity
+            key={option.value}
+            style={[styles.filterButton, filter === option.value && styles.filterButtonActive]}
+            onPress={() => setFilter(option.value)}
+          >
+            <Text
+              style={[
+                styles.filterButtonText,
+                filter === option.value && styles.filterButtonTextActive,
+              ]}
+            >
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {loading ? (
         <ActivityIndicator size="large" style={styles.loader} />
       ) : (
         <FlatList
-          data={orders}
+          data={filteredOrders}
           keyExtractor={(item) => item.id.toString()}
           renderItem={renderOrderCard}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>No open orders. Tap "+ New Order" to create one.</Text>
+            <Text style={styles.emptyText}>
+              {filter === 'ALL'
+                ? 'No open orders. Tap "+ New Order" to create one.'
+                : 'No open orders match this filter.'}
+            </Text>
           }
         />
       )}
@@ -150,7 +186,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   title: {
     fontSize: 22,
@@ -165,6 +201,37 @@ const styles = StyleSheet.create({
   newOrderButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  filterButton: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  filterButtonActive: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  filterButtonText: {
+    color: '#333',
+    fontWeight: '600',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginHorizontal: -14,
+    marginVertical: -6,
+  },
+  filterButtonTextActive: {
+    color: '#fff',
+    backgroundColor: '#2563eb',
+    borderRadius: 20,
   },
   loader: {
     marginTop: 40,

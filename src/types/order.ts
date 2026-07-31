@@ -4,7 +4,7 @@ export type PaymentMethod = 'CASH' | 'CARD';
 
 export interface OrderItem {
   id: number;
-  menuItemId: number | null; // null for custom, one-off items
+  menuItemId: number | null;
   itemName: string;
   unitPrice: number;
   quantity: number;
@@ -12,6 +12,7 @@ export interface OrderItem {
   paid: boolean;
   paymentMethod: PaymentMethod | null;
   custom: boolean;
+  notes: string | null;
 }
 
 export interface OrderSummary {

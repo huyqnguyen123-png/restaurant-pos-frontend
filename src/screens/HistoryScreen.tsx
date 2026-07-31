@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   SectionList,
   TouchableOpacity,
   StyleSheet,
@@ -16,7 +17,7 @@ import { RootStackParamList } from '../navigation/types';
 import { orderApi } from '../api/orderApi';
 import { OrderSummary, PaymentMethod } from '../types/order';
 import { formatCurrency } from '../utils/format';
-import { getHistoryPassword, isHistoryPasswordSet } from '../utils/historyPassword';
+import { isHistoryPasswordSet, verifyHistoryPassword } from '../utils/historyPassword';
 import PasswordInput from '../components/PasswordInput';
 
 type FilterOption = 'ALL' | PaymentMethod;
@@ -57,6 +58,14 @@ export default function HistoryScreen() {
   const [locked, setLocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
 
+  // Bumped whenever data should be refetched.
+  const [reloadTick, setReloadTick] = useState(0);
+
+  // Set to true right before navigating to OrderDetail from this screen, so
+  // useFocusEffect below can tell "returning from viewing an order" apart
+  // from "the user switched to the History tab" — only the latter re-locks.
+  const cameFromDetailRef = useRef(false);
+
   const loadOrders = useCallback(async (selectedFilter: FilterOption) => {
     try {
       setLoading(true);
@@ -72,20 +81,31 @@ export default function HistoryScreen() {
     }
   }, []);
 
-  // Handles the lock ONLY. This effect intentionally has an empty dependency
-  // array, so its reference never changes — react-navigation's useFocusEffect
-  // then only re-runs it on genuine focus/blur transitions (switching tabs
-  // away and back), never as a side-effect of internal state like `filter`
-  // changing while the screen is already focused.
+  // Handles the lock ONLY. Empty dependency array is intentional: it keeps
+  // this effect's identity stable so react-navigation's useFocusEffect only
+  // re-runs it on genuine focus/blur transitions.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       (async () => {
-        const required = await isHistoryPasswordSet();
-        if (cancelled) return;
-        setPasswordRequired(required);
-        setLocked(required);
-        setPasswordInput('');
+        if (cameFromDetailRef.current) {
+          cameFromDetailRef.current = false;
+          if (!cancelled) setReloadTick((t) => t + 1);
+          return;
+        }
+
+        try {
+          const required = await isHistoryPasswordSet();
+          if (cancelled) return;
+          setPasswordRequired(required);
+          setLocked(required);
+          setPasswordInput('');
+          setReloadTick((t) => t + 1);
+        } catch (error) {
+          if (!cancelled) {
+            Alert.alert('Error', 'Could not check password status. Check your connection.');
+          }
+        }
       })();
       return () => {
         cancelled = true;
@@ -93,23 +113,31 @@ export default function HistoryScreen() {
     }, [])
   );
 
-  // Handles loading data. Runs whenever the filter changes, or right after
-  // the screen becomes unlocked — but never re-locks anything, so switching
-  // between All/Cash/Card filters no longer triggers the password screen.
+  // Handles loading data. Runs whenever the filter changes, or whenever the
+  // screen unlocks, or reloadTick is bumped by the focus effect above.
   useEffect(() => {
     if (!locked) {
       loadOrders(filter);
     }
-  }, [filter, locked, loadOrders]);
+  }, [filter, locked, reloadTick, loadOrders]);
 
   const handleUnlock = async () => {
-    const stored = await getHistoryPassword();
-    if (passwordInput === stored) {
-      setLocked(false);
-    } else {
-      Alert.alert('Incorrect password', 'Please try again.');
-      setPasswordInput('');
+    try {
+      const valid = await verifyHistoryPassword(passwordInput);
+      if (valid) {
+        setLocked(false);
+      } else {
+        Alert.alert('Incorrect password', 'Please try again.');
+        setPasswordInput('');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not verify password. Check your connection.');
     }
+  };
+
+  const handleOpenOrder = (orderId: number) => {
+    cameFromDetailRef.current = true;
+    navigation.navigate('OrderDetail', { orderId });
   };
 
   const handleDeleteOrder = (order: OrderSummary) => {
@@ -184,10 +212,7 @@ export default function HistoryScreen() {
           </TouchableOpacity>
         )}
       >
-        <TouchableOpacity
-          style={styles.card}
-          onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
-        >
+        <TouchableOpacity style={styles.card} onPress={() => handleOpenOrder(item.id)}>
           <View style={styles.cardHeader}>
             <Text style={styles.cardLabel}>{label}</Text>
             <Text style={styles.cardTime}>
@@ -353,9 +378,13 @@ const styles = StyleSheet.create({
   filterButtonText: {
     color: '#333',
     fontWeight: '600',
+    backgroundColor: '#fff',
+    borderRadius: 20,
   },
   filterButtonTextActive: {
     color: '#fff',
+    backgroundColor: '#2563eb',
+    borderRadius: 20,
   },
   totalCard: {
     flexDirection: 'row',

@@ -14,7 +14,7 @@ import { formatCurrency } from '../utils/format';
 
 interface Props {
   onAddItem: (menuItemId: number) => void;
-  onAddCustomItem: (name: string, price: number, quantity: number) => void;
+  onAddCustomItem: (name: string, price: number, quantity: number, note: string) => void;
   disabled?: boolean;
 }
 
@@ -27,6 +27,7 @@ export default function AddItemSearch({ onAddItem, onAddCustomItem, disabled }: 
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
   const [customQuantity, setCustomQuantity] = useState('1');
+  const [customNote, setCustomNote] = useState('');
 
   useEffect(() => {
     if (query.trim().length === 0) {
@@ -65,10 +66,11 @@ export default function AddItemSearch({ onAddItem, onAddCustomItem, disabled }: 
     const quantityNumber = parseInt(customQuantity, 10);
     const finalQuantity = isNaN(quantityNumber) || quantityNumber < 1 ? 1 : quantityNumber;
 
-    onAddCustomItem(customName.trim(), priceNumber, finalQuantity);
+    onAddCustomItem(customName.trim(), priceNumber, finalQuantity, customNote.trim());
     setCustomName('');
     setCustomPrice('');
     setCustomQuantity('1');
+    setCustomNote('');
     setShowCustomForm(false);
   };
 
@@ -135,6 +137,12 @@ export default function AddItemSearch({ onAddItem, onAddCustomItem, disabled }: 
               keyboardType="numeric"
             />
           </View>
+          <TextInput
+            style={[styles.input, styles.customNoteInput]}
+            placeholder="Note (optional)"
+            value={customNote}
+            onChangeText={setCustomNote}
+          />
           <View style={styles.customFormButtons}>
             <TouchableOpacity
               style={styles.customAddButton}
@@ -150,6 +158,7 @@ export default function AddItemSearch({ onAddItem, onAddCustomItem, disabled }: 
                 setCustomName('');
                 setCustomPrice('');
                 setCustomQuantity('1');
+                setCustomNote('');
               }}
               disabled={disabled}
             >
@@ -237,6 +246,10 @@ const styles = StyleSheet.create({
   },
   customQtyInput: {
     flex: 1,
+    paddingVertical: 8,
+  },
+  customNoteInput: {
+    marginTop: 6,
     paddingVertical: 8,
   },
   customFormButtons: {

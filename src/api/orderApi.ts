@@ -30,17 +30,16 @@ export const orderApi = {
     return response.data;
   },
 
-  // Renames the table number (dine-in) or customer name (takeaway) — works
-  // whether the order is still open or already paid.
   updateOrderInfo: async (orderId: number, input: UpdateOrderInfoInput): Promise<OrderDetail> => {
     const response = await apiClient.put<OrderDetail>(`/orders/${orderId}`, input);
     return response.data;
   },
 
-  addItem: async (orderId: number, menuItemId: number, quantity: number): Promise<OrderDetail> => {
+  addItem: async (orderId: number, menuItemId: number, quantity: number, note?: string): Promise<OrderDetail> => {
     const response = await apiClient.post<OrderDetail>(`/orders/${orderId}/items`, {
       menuItemId,
       quantity,
+      note,
     });
     return response.data;
   },
@@ -49,12 +48,14 @@ export const orderApi = {
     orderId: number,
     customName: string,
     customPrice: number,
-    quantity: number
+    quantity: number,
+    note?: string
   ): Promise<OrderDetail> => {
     const response = await apiClient.post<OrderDetail>(`/orders/${orderId}/items`, {
       customName,
       customPrice,
       quantity,
+      note,
     });
     return response.data;
   },
@@ -63,6 +64,15 @@ export const orderApi = {
     const response = await apiClient.put<OrderDetail>(
       `/orders/${orderId}/items/${orderItemId}`,
       { quantity }
+    );
+    return response.data;
+  },
+
+  // Adds or edits the note on a specific line item. Pass an empty string to clear it.
+  updateItemNotes: async (orderId: number, orderItemId: number, notes: string): Promise<OrderDetail> => {
+    const response = await apiClient.put<OrderDetail>(
+      `/orders/${orderId}/items/${orderItemId}/notes`,
+      { notes }
     );
     return response.data;
   },
@@ -84,7 +94,6 @@ export const orderApi = {
     return response.data;
   },
 
-  // Corrects a mistaken payment method (CASH <-> CARD) on an already-paid order.
   updatePaymentMethod: async (orderId: number, method: PaymentMethod): Promise<OrderDetail> => {
     const response = await apiClient.put<OrderDetail>(`/orders/${orderId}/payments/method`, { method });
     return response.data;

@@ -1,25 +1,25 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiClient } from '../api/client';
 
-const PASSWORD_KEY = 'history_password';
-
-// Returns the stored password, or null if no password protection has been set up yet.
-export async function getHistoryPassword(): Promise<string | null> {
-  try {
-    return await AsyncStorage.getItem(PASSWORD_KEY);
-  } catch {
-    return null;
-  }
-}
+// History password is now stored server-side (hashed) and shared across
+// every device — no more per-device AsyncStorage copy.
 
 export async function isHistoryPasswordSet(): Promise<boolean> {
-  const pw = await getHistoryPassword();
-  return pw !== null && pw.length > 0;
+  const response = await apiClient.get<{ isSet: boolean }>('/settings/history-password');
+  return response.data.isSet;
 }
 
-export async function setHistoryPassword(password: string): Promise<void> {
-  await AsyncStorage.setItem(PASSWORD_KEY, password);
+export async function verifyHistoryPassword(password: string): Promise<boolean> {
+  const response = await apiClient.post<{ valid: boolean }>('/settings/history-password/verify', {
+    password,
+  });
+  return response.data.valid;
 }
 
-export async function removeHistoryPassword(): Promise<void> {
-  await AsyncStorage.removeItem(PASSWORD_KEY);
+// oldPassword is null only for the very first time a password is being set.
+export async function setHistoryPassword(oldPassword: string | null, newPassword: string): Promise<void> {
+  await apiClient.put('/settings/history-password', { oldPassword, newPassword });
+}
+
+export async function removeHistoryPassword(password: string): Promise<void> {
+  await apiClient.delete('/settings/history-password', { data: { password } });
 }

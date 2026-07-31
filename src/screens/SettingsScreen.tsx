@@ -9,12 +9,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
 import { getStoredBackendHost, saveBackendHost, buildBaseUrl } from '../utils/backendConfig';
 import { apiClient, setApiClientHost } from '../api/client';
 import {
-  getHistoryPassword,
   isHistoryPasswordSet,
+  verifyHistoryPassword,
   setHistoryPassword,
   removeHistoryPassword,
 } from '../utils/historyPassword';
@@ -27,12 +29,18 @@ type PasswordFormMode =
   | 'enteringNewAfterVerify'
   | 'confirmingRemove';
 
+type SettingsNavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
 export default function SettingsScreen() {
+  const navigation = useNavigation<SettingsNavigationProp>();
+
   // --- backend address section ---
   const [host, setHost] = useState('');
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingBackend, setEditingBackend] = useState(false);
+  const [draftHost, setDraftHost] = useState('');
 
   // --- history password section ---
   const [passwordSet, setPasswordSet] = useState(false);
@@ -42,6 +50,7 @@ export default function SettingsScreen() {
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [removePasswordInput, setRemovePasswordInput] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     getStoredBackendHost().then((h) => {
@@ -52,19 +61,35 @@ export default function SettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      isHistoryPasswordSet().then(setPasswordSet);
+      isHistoryPasswordSet()
+        .then(setPasswordSet)
+        .catch(() => {
+          Alert.alert('Error', 'Could not check password status. Check your connection.');
+        });
     }, [])
   );
 
+  // --- backend address handlers ---
+
+  const startEditBackend = () => {
+    setDraftHost(host);
+    setEditingBackend(true);
+  };
+
+  const cancelEditBackend = () => {
+    setEditingBackend(false);
+    setDraftHost('');
+  };
+
   const handleTestConnection = async () => {
-    if (!host.trim()) {
+    if (!draftHost.trim()) {
       Alert.alert('Validation error', 'Please enter an address first');
       return;
     }
     setTesting(true);
     const previousBaseUrl = apiClient.defaults.baseURL;
     try {
-      apiClient.defaults.baseURL = buildBaseUrl(host.trim());
+      apiClient.defaults.baseURL = buildBaseUrl(draftHost.trim());
       await apiClient.get('/menu-items');
       Alert.alert('Success', 'Connected to the backend successfully.');
     } catch (error) {
@@ -79,14 +104,16 @@ export default function SettingsScreen() {
   };
 
   const handleSave = async () => {
-    if (!host.trim()) {
+    if (!draftHost.trim()) {
       Alert.alert('Validation error', 'Please enter a backend address (e.g. 192.168.1.10:8080)');
       return;
     }
     try {
       setSaving(true);
-      await saveBackendHost(host.trim());
-      setApiClientHost(host.trim());
+      await saveBackendHost(draftHost.trim());
+      setApiClientHost(draftHost.trim());
+      setHost(draftHost.trim());
+      setEditingBackend(false);
       Alert.alert('Saved', 'Backend address updated.');
     } finally {
       setSaving(false);
@@ -120,14 +147,21 @@ export default function SettingsScreen() {
   };
 
   const handleVerifyOldPassword = async () => {
-    const stored = await getHistoryPassword();
-    if (oldPasswordInput !== stored) {
-      Alert.alert('Incorrect password', 'The current password you entered is incorrect.');
-      return;
+    try {
+      setVerifying(true);
+      const valid = await verifyHistoryPassword(oldPasswordInput);
+      if (!valid) {
+        Alert.alert('Incorrect password', 'The current password you entered is incorrect.');
+        return;
+      }
+      setFormMode('enteringNewAfterVerify');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+    } catch {
+      Alert.alert('Error', 'Could not verify password. Check your connection.');
+    } finally {
+      setVerifying(false);
     }
-    setFormMode('enteringNewAfterVerify');
-    setNewPasswordInput('');
-    setConfirmPasswordInput('');
   };
 
   const handleSaveNewPassword = async () => {
@@ -139,29 +173,34 @@ export default function SettingsScreen() {
       Alert.alert('Validation error', 'Passwords do not match');
       return;
     }
+
+    const oldPasswordToSend = formMode === 'enteringNewAfterVerify' ? oldPasswordInput : null;
+
     try {
       setSavingPassword(true);
-      await setHistoryPassword(newPasswordInput);
+      await setHistoryPassword(oldPasswordToSend, newPasswordInput);
       setPasswordSet(true);
       resetPasswordForm();
-      Alert.alert('Saved', 'History password updated.');
+      Alert.alert('Saved', 'History password updated for all devices.');
+    } catch (error: any) {
+      Alert.alert('Error', error?.response?.data?.error || 'Failed to update password');
     } finally {
       setSavingPassword(false);
     }
   };
 
-  // Removing the password now requires re-entering the CURRENT password
-  // correctly first, instead of just a confirmation dialog.
   const handleConfirmRemove = async () => {
-    const stored = await getHistoryPassword();
-    if (removePasswordInput !== stored) {
-      Alert.alert('Incorrect password', 'The current password you entered is incorrect.');
-      return;
+    try {
+      await removeHistoryPassword(removePasswordInput);
+      setPasswordSet(false);
+      resetPasswordForm();
+      Alert.alert('Removed', 'History password protection has been removed for all devices.');
+    } catch (error: any) {
+      Alert.alert(
+        'Incorrect password',
+        error?.response?.data?.error || 'The current password you entered is incorrect.'
+      );
     }
-    await removeHistoryPassword();
-    setPasswordSet(false);
-    resetPasswordForm();
-    Alert.alert('Removed', 'History password protection has been removed.');
   };
 
   if (loading) {
@@ -172,36 +211,64 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Text style={styles.title}>Settings</Text>
 
+      <Text style={styles.label}>Menu</Text>
+      <TouchableOpacity
+        style={styles.navRow}
+        onPress={() => navigation.navigate('MenuManagement')}
+      >
+        <Text style={styles.navRowText}>Manage Menu Items</Text>
+        <Text style={styles.navRowArrow}>›</Text>
+      </TouchableOpacity>
+
+      <View style={styles.divider} />
+
       <Text style={styles.label}>Backend server address</Text>
       <Text style={styles.hint}>
         Cloud backend: just the domain (e.g. myapp.up.railway.app){'\n'}
         Local network: full URL with http:// (e.g. http://192.168.1.10:8080)
       </Text>
-      <TextInput
-        style={styles.input}
-        value={host}
-        onChangeText={setHost}
-        placeholder="myapp.up.railway.app"
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
 
-      <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.testButton} onPress={handleTestConnection} disabled={testing}>
-          <Text style={styles.testButtonText}>{testing ? 'Testing...' : 'Test Connection'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
-          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
-        </TouchableOpacity>
-      </View>
+      {!editingBackend ? (
+        <View style={styles.lockedRow}>
+          <Text style={styles.lockedValue} numberOfLines={1}>
+            {host}
+          </Text>
+          <TouchableOpacity onPress={startEditBackend}>
+            <Text style={styles.editLink}>Edit</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          <TextInput
+            style={styles.input}
+            value={draftHost}
+            onChangeText={setDraftHost}
+            placeholder="myapp.up.railway.app"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+          />
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.testButton} onPress={handleTestConnection} disabled={testing}>
+              <Text style={styles.testButtonText}>{testing ? 'Testing...' : 'Test Connection'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
+              <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity onPress={cancelEditBackend} style={styles.cancelLinkTouch}>
+            <Text style={styles.cancelLink}>Cancel</Text>
+          </TouchableOpacity>
+        </>
+      )}
 
       <View style={styles.divider} />
 
       <Text style={styles.label}>History password protection</Text>
       <Text style={styles.hint}>
         {passwordSet
-          ? 'A password is required every time History is opened.'
-          : 'No password set — History is open to anyone.'}
+          ? 'A password is required every time History is opened. Shared across all devices.'
+          : 'No password set — History is open to anyone on any device.'}
       </Text>
 
       {formMode === 'idle' && (
@@ -254,8 +321,8 @@ export default function SettingsScreen() {
             onChangeText={setOldPasswordInput}
           />
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.saveButton} onPress={handleVerifyOldPassword}>
-              <Text style={styles.saveButtonText}>Verify</Text>
+            <TouchableOpacity style={styles.saveButton} onPress={handleVerifyOldPassword} disabled={verifying}>
+              <Text style={styles.saveButtonText}>{verifying ? 'Checking...' : 'Verify'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.testButton} onPress={resetPasswordForm}>
               <Text style={styles.testButtonText}>Cancel</Text>
@@ -289,7 +356,7 @@ export default function SettingsScreen() {
 
       {formMode === 'confirmingRemove' && (
         <View style={styles.passwordForm}>
-          <Text style={styles.hint}>Enter the current password to remove protection.</Text>
+          <Text style={styles.hint}>Enter the current password to remove protection on all devices.</Text>
           <PasswordInput
             placeholder="Current password"
             value={removePasswordInput}
@@ -315,6 +382,29 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: 'bold', marginBottom: 20 },
   label: { fontSize: 15, fontWeight: '600', marginBottom: 4 },
   hint: { fontSize: 12, color: '#999', marginBottom: 8 },
+  navRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+  },
+  navRowText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    backgroundColor: '#fff',
+  },
+  navRowArrow: {
+    fontSize: 18,
+    color: '#9ca3af',
+    backgroundColor: '#fff',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
@@ -323,6 +413,42 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     marginBottom: 12,
+  },
+  lockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 10,
+  },
+  lockedValue: {
+    fontSize: 14,
+    color: '#374151',
+    flex: 1,
+    backgroundColor: '#f9fafb',
+  },
+  editLink: {
+    color: '#2563eb',
+    fontWeight: '600',
+    fontSize: 13,
+    backgroundColor: '#f9fafb',
+  },
+  cancelLinkTouch: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  cancelLink: {
+    color: '#6b7280',
+    fontWeight: '600',
+    fontSize: 13,
+    backgroundColor: '#fff',
+    textAlign: 'center',
   },
   buttonRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   testButton: {

@@ -9,7 +9,6 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { menuApi } from '../api/menuApi';
 import { MenuItem } from '../types/menu';
@@ -22,7 +21,6 @@ export default function MenuManagementScreen() {
   const [price, setPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline edit state: which item is currently being edited, and its draft values.
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editPrice, setEditPrice] = useState('');
@@ -180,9 +178,7 @@ export default function MenuManagementScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <Text style={styles.title}>Menu Management</Text>
-
+    <View style={styles.container}>
       <View style={styles.formRow}>
         <TextInput
           style={[styles.input, styles.nameInput]}
@@ -218,7 +214,7 @@ export default function MenuManagementScreen() {
           }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -227,11 +223,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     padding: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 16,
   },
   formRow: {
     flexDirection: 'row',

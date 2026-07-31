@@ -4,6 +4,7 @@ import { RootStackParamList } from './types';
 import MainTabs from './MainTabs';
 import CreateOrderScreen from '../screens/CreateOrderScreen';
 import OrderDetailScreen from '../screens/OrderDetailScreen';
+import MenuManagementScreen from '../screens/MenuManagementScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -24,6 +25,11 @@ export default function RootNavigator() {
         name="OrderDetail"
         component={OrderDetailScreen}
         options={{ title: 'Order Details' }}
+      />
+      <Stack.Screen
+        name="MenuManagement"
+        component={MenuManagementScreen}
+        options={{ title: 'Menu Management' }}
       />
     </Stack.Navigator>
   );
