@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -120,4 +121,10 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Firebase BOM (Bill of Materials) keeps all Firebase library versions
+    // in sync with each other automatically — no need to specify a version
+    // number on the individual Firebase dependencies below.
+    implementation platform("com.google.firebase:firebase-bom:33.7.0")
+    implementation "com.google.firebase:firebase-messaging"
 }

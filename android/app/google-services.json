@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "421125784811",
+    "project_id": "restaurant-pos-notifications",
+    "storage_bucket": "restaurant-pos-notifications.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:421125784811:android:5926c5303bf39ee639aaae",
+        "android_client_info": {
+          "package_name": "com.frontend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDlTr-JuTZ-SwOiOsPM0tzNV3d_X7sbQko"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
