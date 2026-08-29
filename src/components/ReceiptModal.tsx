@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView, StatusBar } from 'react-native';
-import { OrderDetail } from '../types/order';
+import { OrderDetail, OrderItem } from '../types/order';
 import { formatCurrency } from '../utils/format';
 import { RESTAURANT_NAME, RESTAURANT_ADDRESS } from '../utils/restaurantInfo';
 
@@ -23,6 +23,22 @@ export default function ReceiptModal({ visible, order, onClose }: Props) {
   }, [visible]);
 
   if (!order) return null;
+
+  const mergedItems: OrderItem[] = [];
+  for (const item of order.items) {
+    const existing = mergedItems.find(
+      (m) =>
+        m.itemName === item.itemName &&
+        m.unitPrice === item.unitPrice &&
+        (m.notes ?? '') === (item.notes ?? '')
+    );
+    if (existing) {
+      existing.quantity += item.quantity;
+      existing.subtotal += item.subtotal;
+    } else {
+      mergedItems.push({ ...item });
+    }
+  }
 
   const label =
     order.orderType === 'DINE_IN'
@@ -67,7 +83,7 @@ export default function ReceiptModal({ visible, order, onClose }: Props) {
 
             {/* --- scrollable middle: item list --- */}
             <ScrollView style={styles.itemsScroll} contentContainerStyle={styles.itemsScrollContent}>
-              {order.items.map((item) => (
+              {mergedItems.map((item) => (
                 <View key={item.id} style={styles.itemBlock}>
                   <View style={styles.rowBetween}>
                     <Text style={styles.itemText}>

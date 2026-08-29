@@ -14,10 +14,11 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ReceiptPercentIcon } from 'react-native-heroicons/outline';
 import { RootStackParamList } from '../navigation/types';
 import { orderApi } from '../api/orderApi';
-import { OrderDetail, OrderItem, PaymentMethod } from '../types/order';
+import { OrderDetail, OrderItem, OrderLine, PaymentMethod } from '../types/order';
 import { formatCurrency } from '../utils/format';
 import AddItemSearch from '../components/AddItemSearch';
 import ReceiptModal from '../components/ReceiptModal';
+import PaymentMethodModal from '../components/PaymentMethodModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderDetail'>;
 
@@ -39,6 +40,8 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
   const [savingNote, setSavingNote] = useState(false);
 
   const [receiptVisible, setReceiptVisible] = useState(false);
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [pendingPaymentAction, setPendingPaymentAction] = useState<((method: PaymentMethod) => void) | null>(null);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -72,9 +75,6 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
   const currentPaymentMethod: PaymentMethod | null =
     order?.status === 'PAID' ? order.items[0]?.paymentMethod ?? null : null;
 
-  // Live running total of exactly what's currently selected in Split Bill
-  // mode, honoring any partial quantity chosen per item (not just the
-  // item's full subtotal) — recalculated on every render as selections change.
   const splitSelectedTotal = order
     ? selectedItemIds.reduce((sum, id) => {
         const item = order.items.find((i) => i.id === id);
@@ -146,6 +146,32 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
     ]);
   };
 
+  // Appends a new divider at the end of the order — matches the natural
+  // workflow of "person 1 finishes ordering, tap Split, person 2 starts".
+  const handleAddDivider = async () => {
+    try {
+      setBusy(true);
+      const updated = await orderApi.addDivider(orderId);
+      setOrder(updated);
+    } catch (error: any) {
+      Alert.alert('Error', error?.response?.data?.error || 'Failed to add divider');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveDivider = async (dividerId: number) => {
+    try {
+      setBusy(true);
+      const updated = await orderApi.removeDivider(orderId, dividerId);
+      setOrder(updated);
+    } catch (error: any) {
+      Alert.alert('Error', error?.response?.data?.error || 'Failed to remove divider');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toggleItemSelection = (item: OrderItem) => {
     setSelectedItemIds((prev) => {
       if (prev.includes(item.id)) {
@@ -170,11 +196,16 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
   };
 
   const promptPaymentMethod = (onChoose: (method: PaymentMethod) => void) => {
-    Alert.alert('Choose payment method', undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Cash', onPress: () => onChoose('CASH') },
-      { text: 'Card', onPress: () => onChoose('CARD') },
-    ]);
+    setPendingPaymentAction(() => onChoose);
+    setPaymentModalVisible(true);
+  };
+
+  const handleSelectPaymentMethod = (method: PaymentMethod) => {
+    setPaymentModalVisible(false);
+    if (pendingPaymentAction) {
+      pendingPaymentAction(method);
+    }
+    setPendingPaymentAction(null);
   };
 
   const handlePayFull = () => {
@@ -234,7 +265,7 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
     if (!order) return;
 
     if (order.orderType === 'DINE_IN') {
-      const num = parseInt(editValue, 10);
+      const num = parseFloat(editValue);
       if (isNaN(num) || num <= 0) {
         Alert.alert('Validation error', 'Please enter a valid table number');
         return;
@@ -268,11 +299,7 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
   };
 
   const handleChangePaymentMethod = () => {
-    Alert.alert('Change payment method', 'Correct the payment method for this order', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Cash', onPress: () => doChangePaymentMethod('CASH') },
-      { text: 'Card', onPress: () => doChangePaymentMethod('CARD') },
-    ]);
+    promptPaymentMethod(doChangePaymentMethod);
   };
 
   const doChangePaymentMethod = async (method: PaymentMethod) => {
@@ -320,7 +347,30 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
       ? `Table ${order.tableNumber}`
       : `Takeaway - ${order.customerName}`;
 
-  const renderItem = ({ item }: { item: OrderItem }) => {
+  // Fallback for orders saved before the timeline field existed —
+  // shows plain items with no dividers rather than crashing.
+  const timeline: OrderLine[] =
+    order.timeline && order.timeline.length > 0
+      ? order.timeline
+      : order.items.map((item) => ({ type: 'ITEM' as const, item, dividerId: null }));
+
+  const renderDivider = (dividerId: number) => (
+    <View style={styles.dividerRow}>
+      <View style={styles.dividerLine} />
+      {isOpen && !splitMode && (
+        <TouchableOpacity
+          onPress={() => handleRemoveDivider(dividerId)}
+          style={styles.dividerRemoveButton}
+          disabled={busy}
+        >
+          <Text style={styles.dividerRemoveText}>✕</Text>
+        </TouchableOpacity>
+      )}
+      <View style={styles.dividerLine} />
+    </View>
+  );
+
+  const renderItemRow = (item: OrderItem) => {
     const isSelected = selectedItemIds.includes(item.id);
     const selectedQty = selectedQuantities[item.id] ?? item.quantity;
     const isEditingNote = editingNoteItemId === item.id;
@@ -415,6 +465,16 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
     );
   };
 
+  const renderLine = ({ item: line }: { item: OrderLine }) => {
+    if (line.type === 'DIVIDER' && line.dividerId != null) {
+      return renderDivider(line.dividerId);
+    }
+    if (line.type === 'ITEM' && line.item) {
+      return renderItemRow(line.item);
+    }
+    return null;
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -425,7 +485,7 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
                 style={styles.editInfoInput}
                 value={editValue}
                 onChangeText={setEditValue}
-                keyboardType={order.orderType === 'DINE_IN' ? 'numeric' : 'default'}
+                keyboardType={order.orderType === 'DINE_IN' ? 'decimal-pad' : 'default'}
                 autoFocus
               />
               <TouchableOpacity style={styles.smallSaveButton} onPress={saveInfoEdit} disabled={savingInfo}>
@@ -460,10 +520,18 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
 
       {isOpen && <AddItemSearch onAddItem={handleAddItem} onAddCustomItem={handleAddCustomItem} disabled={busy} />}
 
+      {isOpen && !splitMode && order.items.length > 0 && (
+        <TouchableOpacity style={styles.addDividerButton} onPress={handleAddDivider} disabled={busy}>
+          <Text style={styles.addDividerButtonText}>+ Split for next person</Text>
+        </TouchableOpacity>
+      )}
+
       <FlatList
-        data={order.items}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={renderItem}
+        data={timeline}
+        keyExtractor={(line, index) =>
+          line.type === 'ITEM' && line.item ? `item-${line.item.id}` : `divider-${line.dividerId}-${index}`
+        }
+        renderItem={renderLine}
         ListEmptyComponent={<Text style={styles.emptyText}>No items yet. Search above to add one.</Text>}
       />
 
@@ -516,6 +584,15 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
         visible={receiptVisible}
         order={order}
         onClose={() => setReceiptVisible(false)}
+      />
+
+      <PaymentMethodModal
+        visible={paymentModalVisible}
+        onClose={() => {
+          setPaymentModalVisible(false);
+          setPendingPaymentAction(null);
+        }}
+        onSelect={handleSelectPaymentMethod}
       />
     </View>
   );
@@ -613,6 +690,48 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#166534',
     backgroundColor: '#f0fdf4',
+  },
+  addDividerButton: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  addDividerButtonText: {
+    color: '#6b7280',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 8,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#d1d5db',
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  dividerRemoveButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#fee2e2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dividerRemoveText: {
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   itemRow: {
     flexDirection: 'row',

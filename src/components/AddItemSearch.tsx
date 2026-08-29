@@ -8,6 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
+import { XCircleIcon } from 'react-native-heroicons/solid';
 import { menuApi } from '../api/menuApi';
 import { MenuItem } from '../types/menu';
 import { formatCurrency } from '../utils/format';
@@ -49,8 +50,14 @@ export default function AddItemSearch({ onAddItem, onAddCustomItem, disabled }: 
     return () => clearTimeout(timeoutId);
   }, [query]);
 
+  // Keeps the search text and results in place after adding an item, so
+  // staff can tap the same item again for another unit, or pick a
+  // different result from the same search, without retyping the query.
   const handleSelect = (item: MenuItem) => {
     onAddItem(item.id);
+  };
+
+  const handleClearQuery = () => {
     setQuery('');
     setResults([]);
   };
@@ -76,13 +83,25 @@ export default function AddItemSearch({ onAddItem, onAddCustomItem, disabled }: 
 
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.input}
-        placeholder="Search menu item to add..."
-        value={query}
-        onChangeText={setQuery}
-        editable={!disabled}
-      />
+      <View style={styles.inputWrapper}>
+        <TextInput
+          style={styles.input}
+          placeholder="Search menu item to add..."
+          value={query}
+          onChangeText={setQuery}
+          editable={!disabled}
+        />
+        {query.length > 0 && (
+          <TouchableOpacity
+            onPress={handleClearQuery}
+            style={styles.clearButton}
+            hitSlop={10}
+            disabled={disabled}
+          >
+            <XCircleIcon size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+      </View>
       {searching && <ActivityIndicator style={styles.spinner} />}
       {results.length > 0 && (
         <View style={styles.resultsBox}>
@@ -175,6 +194,10 @@ const styles = StyleSheet.create({
   container: {
     marginBottom: 12,
   },
+  inputWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
@@ -182,6 +205,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    paddingRight: 36,
+  },
+  clearButton: {
+    position: 'absolute',
+    right: 10,
   },
   spinner: {
     marginTop: 6,

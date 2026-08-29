@@ -22,7 +22,7 @@ export default function CreateOrderScreen({ navigation }: Props) {
 
   const handleCreate = async () => {
     if (orderType === 'DINE_IN') {
-      const tableNum = parseInt(tableNumber, 10);
+      const tableNum = parseFloat(tableNumber);
       if (isNaN(tableNum) || tableNum <= 0) {
         Alert.alert('Validation error', 'Please enter a valid table number');
         return;
@@ -38,7 +38,7 @@ export default function CreateOrderScreen({ navigation }: Props) {
       setSubmitting(true);
       const created = await orderApi.createOrder({
         orderType,
-        tableNumber: orderType === 'DINE_IN' ? parseInt(tableNumber, 10) : undefined,
+        tableNumber: orderType === 'DINE_IN' ? parseFloat(tableNumber) : undefined,
         customerName: orderType === 'TAKEAWAY' ? customerName.trim() : undefined,
       });
       // Replace this screen with OrderDetail so the back button
@@ -78,10 +78,15 @@ export default function CreateOrderScreen({ navigation }: Props) {
       {orderType === 'DINE_IN' ? (
         <TextInput
           style={styles.input}
-          placeholder="Table number"
+          placeholder="Table number (e.g. 6 or 6.1)"
           value={tableNumber}
-          onChangeText={setTableNumber}
-          keyboardType="numeric"
+          onChangeText={(text) => {
+            const sanitized = text.replace(/[^0-9.]/g, '');
+            const parts = sanitized.split('.');
+            const cleaned = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
+            setTableNumber(cleaned);
+          }}
+          keyboardType="decimal-pad"
         />
       ) : (
         <TextInput

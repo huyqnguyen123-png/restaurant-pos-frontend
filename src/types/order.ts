@@ -15,6 +15,14 @@ export interface OrderItem {
   notes: string | null;
 }
 
+// One row in the order's visual timeline — either a real item, or a
+// divider marking where one person's order ends and the next begins.
+export interface OrderLine {
+  type: 'ITEM' | 'DIVIDER';
+  item: OrderItem | null;
+  dividerId: number | null;
+}
+
 export interface OrderSummary {
   id: number;
   orderType: OrderType;
@@ -27,6 +35,7 @@ export interface OrderSummary {
 
 export interface OrderDetail extends Omit<OrderSummary, never> {
   items: OrderItem[];
+  timeline: OrderLine[];
 }
 
 export interface CreateOrderInput {

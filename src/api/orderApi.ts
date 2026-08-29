@@ -99,7 +99,17 @@ export const orderApi = {
     return response.data;
   },
 
-  deleteOrder: async (orderId: number): Promise<void> => {
+ deleteOrder: async (orderId: number): Promise<void> => {
     await apiClient.delete(`/orders/${orderId}`);
+  },
+
+  addDivider: async (orderId: number): Promise<OrderDetail> => {
+    const response = await apiClient.post<OrderDetail>(`/orders/${orderId}/dividers`);
+    return response.data;
+  },
+
+  removeDivider: async (orderId: number, dividerId: number): Promise<OrderDetail> => {
+    const response = await apiClient.delete<OrderDetail>(`/orders/${orderId}/dividers/${dividerId}`);
+    return response.data;
   },
 };
